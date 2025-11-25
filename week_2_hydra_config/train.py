@@ -26,12 +26,21 @@ class SamplesVisualisationLogger(pl.Callback):
         val_batch = next(iter(self.datamodule.val_dataloader()))
         sentences = val_batch["sentence"]
 
-        outputs = pl_module(val_batch["input_ids"], val_batch["attention_mask"])
+        # Move inputs to the same device as the model (MPS/GPU/CPU)
+        device = pl_module.device
+        input_ids = val_batch["input_ids"].to(device)
+        attention_mask = val_batch["attention_mask"].to(device)
+        labels = val_batch["label"].to(device)
+
+        outputs = pl_module(input_ids, attention_mask)
         preds = torch.argmax(outputs.logits, 1)
-        labels = val_batch["label"]
+
+        # Move to CPU for numpy conversion (required for MPS)
+        labels_cpu = labels.cpu()
+        preds_cpu = preds.cpu()
 
         df = pd.DataFrame(
-            {"Sentence": sentences, "Label": labels.numpy(), "Predicted": preds.numpy()}
+            {"Sentence": sentences, "Label": labels_cpu.numpy(), "Predicted": preds_cpu.numpy()}
         )
 
         wrong_df = df[df["Label"] != df["Predicted"]]
@@ -64,7 +73,16 @@ def main(cfg):
         monitor="valid/loss", patience=3, verbose=True, mode="min"
     )
 
-    wandb_logger = WandbLogger(project="MLOps Basics", entity="raviraja")
+    # W&B logger - set mode to "offline" if not logged in
+    import os
+    wandb_mode = os.getenv("WANDB_MODE", "online")
+    # Use environment variable for entity, or default to None (uses logged-in user)
+    wandb_entity = os.getenv("WANDB_ENTITY", None)
+    wandb_logger = WandbLogger(
+        project="MLOps Basics", 
+        entity=wandb_entity,  # None means use logged-in user
+        mode=wandb_mode
+    )
     trainer = pl.Trainer(
         max_epochs=cfg.training.max_epochs,
         logger=wandb_logger,
@@ -73,6 +91,7 @@ def main(cfg):
         deterministic=cfg.training.deterministic,
         limit_train_batches=cfg.training.limit_train_batches,
         limit_val_batches=cfg.training.limit_val_batches,
+        accelerator="auto",  # Automatically detects MPS, GPU, or CPU
     )
     trainer.fit(cola_model, cola_data)
     wandb.finish()

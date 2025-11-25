@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
 from transformers import AutoModelForSequenceClassification
-import torchmetrics
+from torchmetrics import Accuracy, F1Score, Precision, Recall
 from sklearn.metrics import confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -19,17 +19,20 @@ class ColaModel(pl.LightningModule):
             model_name, num_labels=2
         )
         self.num_classes = 2
-        self.train_accuracy_metric = torchmetrics.Accuracy()
-        self.val_accuracy_metric = torchmetrics.Accuracy()
-        self.f1_metric = torchmetrics.F1(num_classes=self.num_classes)
-        self.precision_macro_metric = torchmetrics.Precision(
-            average="macro", num_classes=self.num_classes
+        self.train_accuracy_metric = Accuracy(task="binary")
+        self.val_accuracy_metric = Accuracy(task="binary")
+        self.f1_metric = F1Score(task="binary", num_classes=self.num_classes)
+        self.precision_macro_metric = Precision(
+            task="binary", average="macro", num_classes=self.num_classes
         )
-        self.recall_macro_metric = torchmetrics.Recall(
-            average="macro", num_classes=self.num_classes
+        self.recall_macro_metric = Recall(
+            task="binary", average="macro", num_classes=self.num_classes
         )
-        self.precision_micro_metric = torchmetrics.Precision(average="micro")
-        self.recall_micro_metric = torchmetrics.Recall(average="micro")
+        self.precision_micro_metric = Precision(task="binary", average="micro")
+        self.recall_micro_metric = Recall(task="binary", average="micro")
+        
+        # Store validation outputs for epoch end
+        self.validation_step_outputs = []
 
     def forward(self, input_ids, attention_mask, labels=None):
         outputs = self.bert(
@@ -71,28 +74,41 @@ class ColaModel(pl.LightningModule):
         self.log("valid/precision_micro", precision_micro, prog_bar=True, on_epoch=True)
         self.log("valid/recall_micro", recall_micro, prog_bar=True, on_epoch=True)
         self.log("valid/f1", f1, prog_bar=True, on_epoch=True)
+        
+        # Store outputs for epoch end
+        self.validation_step_outputs.append({"labels": labels, "logits": outputs.logits})
+        
         return {"labels": labels, "logits": outputs.logits}
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
+        # Get outputs from validation_step
+        outputs = self.validation_step_outputs
         labels = torch.cat([x["labels"] for x in outputs])
         logits = torch.cat([x["logits"] for x in outputs])
         preds = torch.argmax(logits, 1)
+
+        # Move to CPU for numpy conversion (required for MPS)
+        labels_cpu = labels.cpu()
+        logits_cpu = logits.cpu()
 
         ## There are multiple ways to track the metrics
         # 1. Confusion matrix plotting using inbuilt W&B method
         self.logger.experiment.log(
             {
                 "conf": wandb.plot.confusion_matrix(
-                    probs=logits.numpy(), y_true=labels.numpy()
+                    probs=logits_cpu.numpy(), y_true=labels_cpu.numpy()
                 )
             }
         )
+        
+        # Clear outputs for next epoch
+        self.validation_step_outputs.clear()
 
         # 2. Confusion Matrix plotting using scikit-learn method
-        # wandb.log({"cm": wandb.sklearn.plot_confusion_matrix(labels.numpy(), preds)})
+        # wandb.log({"cm": wandb.sklearn.plot_confusion_matrix(labels_cpu.numpy(), preds.cpu().numpy())})
 
         # 3. Confusion Matric plotting using Seaborn
-        # data = confusion_matrix(labels.numpy(), preds.numpy())
+        # data = confusion_matrix(labels_cpu.numpy(), preds.cpu().numpy())
         # df_cm = pd.DataFrame(data, columns=np.unique(labels), index=np.unique(labels))
         # df_cm.index.name = "Actual"
         # df_cm.columns.name = "Predicted"
@@ -103,7 +119,7 @@ class ColaModel(pl.LightningModule):
         # self.logger.experiment.log({"Confusion Matrix": wandb.Image(plot)})
 
         # self.logger.experiment.log(
-        #     {"roc": wandb.plot.roc_curve(labels.numpy(), logits.numpy())}
+        #     {"roc": wandb.plot.roc_curve(labels_cpu.numpy(), logits_cpu.numpy())}
         # )
 
     def configure_optimizers(self):

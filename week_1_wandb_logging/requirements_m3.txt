@@ -1,0 +1,39 @@
+# M3芯片Mac专用依赖文件
+# 使用支持MPS（Metal Performance Shaders）的PyTorch版本
+
+# PyTorch - 支持M3芯片的MPS加速
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+
+# PyTorch Lightning - 兼容新版本PyTorch
+pytorch-lightning>=2.0.0
+
+# Transformers - 兼容新版本
+transformers>=4.30.0
+
+# 数据处理
+datasets>=2.0.0
+pyarrow>=10.0.0
+
+# 机器学习工具
+scikit-learn>=1.3.0
+torchmetrics>=0.11.0
+
+# 可视化
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# 日志和监控
+wandb>=0.15.0
+
+# 数据处理
+pandas>=2.0.0
+numpy>=1.24.0,<2.0.0
+
+# TensorBoard支持
+tensorboard>=2.13.0
+
+# Protobuf - 兼容tensorflow和streamlit
+protobuf>=5.28.0,<6.0.0
+
